@@ -22,8 +22,8 @@ nodes failed at once. But having a full cluster config backup is still useful an
 The script must be run as root, and can be run from cron or an interactive terminal.
 
 ## Backup
-* Download the [script](https://raw.githubusercontent.com/DerDanilo/proxmox-stuff/master/prox_config_backup.sh)  
-```cd /root/; wget -qO- https://raw.githubusercontent.com/DerDanilo/proxmox-stuff/master/prox_config_backup.sh```
+* Download the [script](https://raw.githubusercontent.com/nstwfdev/proxmox-stuff/master/prox_config_backup.sh)  
+```cd /root/; wget -qO- https://raw.githubusercontent.com/nstwfdev/proxmox-stuff/master/prox_config_backup.sh```
 * Set the permanent backups directory environment variable ```export BACK_DIR="/path/to/backup/directory"``` or edit the script to set the `$DEFAULT_BACK_DIR` variable to your preferred backup directory
 * Make the script executable ```chmod +x ./prox_config_backup.sh```
 * Shut down ALL VMs + LXC Containers if you want to go the safe way. (Not required)
@@ -46,7 +46,7 @@ For more info also see #5.
 
 To set up a automatic cron job on a monthly (```/etc/cron.weekly``` or ```/etc/cron.daily``` can be used to!) schedule, running the prox_config_backup script, follow these steps:
 
-```wget https://raw.githubusercontent.com/DerDanilo/proxmox-stuff/master/prox_config_backup.sh -O /etc/cron.monthly/prox_config_backup```
+```wget https://raw.githubusercontent.com/nstwfdev/proxmox-stuff/master/prox_config_backup.sh -O /etc/cron.monthly/prox_config_backup```
 
 Change ```DEFAULT_BACK_DIR="/mnt/pve/truenas_backup/pve"``` and ```MAX_BACKUPS=5``` to the values you want!
 
@@ -89,8 +89,8 @@ You should be back where you started. But let's hope it never comes to that.
 
 ### Script
 
-* Download the [script](https://raw.githubusercontent.com/DerDanilo/proxmox-stuff/master/prox_config_restore.sh)  
-```cd /root/; wget -qO- https://raw.githubusercontent.com/DerDanilo/proxmox-stuff/master/prox_config_restore.sh```
+* Download the [script](https://raw.githubusercontent.com/nstwfdev/proxmox-stuff/master/prox_config_restore.sh)  
+```cd /root/; wget -qO- https://raw.githubusercontent.com/nstwfdev/proxmox-stuff/master/prox_config_restore.sh```
 * Make the script executable ```chmod +x ./prox_config_restore.sh```
 * Run the script ```./prox_config_restore.sh proxmox_backup_proxmoxhostname_2017-12-02.15.48.10.tar.gz```
 
