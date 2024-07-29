@@ -1,187 +1,175 @@
 #!/bin/bash
-# Version	      0.2.4
-# Date		      08.04.2024
-# Author 	      DerDanilo 
-# Contributors    aboutte, xmirakulix, bootsie123, phidauex
-
 ###########################
 # Configuration Variables #
 ###########################
 
-# Permanent backups directory
-# Default value can be overridden by setting environment variable before running prox_config_backup.sh
-#   example: export BACK_DIR="/mnt/pve/media/backup"
-#   or
-#   example: BACK_DIR="." ./prox_config_backup.sh
-DEFAULT_BACK_DIR="/mnt/pve/media/backup"
-
-# number of backups to keep before overriding the oldest one
+DEFAULT_BACK_DIR="/pve-backup/backups"
 MAX_BACKUPS=5
 
-# Healthchecks.io notification service
-# Set to 1 to use Healthchecks.io
-HEALTHCHECKS=0
-# Set to the URL of your healthchecks.io check
-HEALTHCHECKS_URL=https://hc-ping.com/your_uuid_here
+SLACK_API_TOKEN="xoxb-***"
+SLACK_CHANNEL="***"
 
 ###########################
 
 # Set terminal to "dumb" if not set (cron compatibility)
 export TERM=${TERM:-dumb}
 
-# always exit on error
+# Always exit on error
 set -e
 
 # Set backup directory to default OR environment variable
 _bdir=${BACK_DIR:-$DEFAULT_BACK_DIR}
 
-# Check backup directory exists
+# Check if backup directory exists
 if [[ ! -d "${_bdir}" ]] ; then
-    echo "Aborting because backup target does not exists" ; exit 1
+    echo "Aborting because backup target does not exist"
+    exit 1
 fi
 
-# temporary storage directory
+# Temporary storage directory
 _tdir=${TMP_DIR:-/var/tmp}
-
-_tdir=$(mktemp -d $_tdir/proxmox-XXXXXXXX)
+_tdir=$(mktemp -d "${_tdir}/proxmox-XXXXXXXX")
 
 function clean_up {
-    exit_code=$?
     echo "Cleaning up"
-    rm -rf $_tdir
-
-    # Ping Healthchecks.io if enabled
-    if [ $HEALTHCHECKS -eq 1 ]; then
-        echo "Healthchecks.io notification is enabled"
-        curl -fsS -m 10 --retry 5 -o /dev/null $HEALTHCHECKS_URL/${exit_code}
-    fi
+    rm -rf "${_tdir}"
 }
 
-# register the cleanup function to be called on the EXIT signal
+# Register the cleanup function to be called on the EXIT signal
 trap clean_up EXIT
 
-# Don't change if not required
+# Set current date and hostname
 _now=$(date +%Y-%m-%d.%H.%M.%S)
 _HOSTNAME=$(hostname)
-_filename1="$_tdir/proxmoxetc.$_now.tar"
-_filename2="$_tdir/proxmoxvarlibpve.$_now.tar"
-_filename3="$_tdir/proxmoxroot.$_now.tar"
-_filename4="$_tdir/proxmoxcron.$_now.tar"
-_filename5="$_tdir/proxmoxvbios.$_now.tar"
-_filename6="$_tdir/proxmoxpackages.$_now.list"
-_filename7="$_tdir/proxmoxreport.$_now.txt"
-_filename8="$_tdir/proxmoxlocalbin.$_now.tar"
-_filename9="$_tdir/proxmoxetcpve.$_now.tar"
-_filename_final="$_tdir/pve_"$_HOSTNAME"_"$_now".tar.gz"
+
+# Define backup file names
+_filename1="${_tdir}/proxmoxetc.${_now}.tar"
+_filename2="${_tdir}/proxmoxvarlibpve.${_now}.tar"
+_filename3="${_tdir}/proxmoxroot.${_now}.tar"
+_filename4="${_tdir}/proxmoxcron.${_now}.tar"
+_filename5="${_tdir}/proxmoxvbios.${_now}.tar"
+_filename6="${_tdir}/proxmoxpackages.${_now}.list"
+_filename7="${_tdir}/proxmoxreport.${_now}.txt"
+_filename8="${_tdir}/proxmoxlocalbin.${_now}.tar"
+_filename9="${_tdir}/proxmoxetcpve.${_now}.tar"
+_filename_final="${_tdir}/pve_${_HOSTNAME}_${_now}.tar.gz"
 
 ##########
 
-function description {
-# Check to see if we are in an interactive terminal, if not, skip the description
-    if [[ -t 0 && -t 1 ]]; then
-        clear
-        cat <<EOF
+function check_num_backups {
+    local backup_count
+    backup_count=$(ls "${_bdir}"/*"${_HOSTNAME}"*_*.tar.gz -l | grep ^- | wc -l)
 
-        Proxmox Server Config Backup
-        Hostname: "$_HOSTNAME"
-        Timestamp: "$_now"
-
-        Files to be saved:
-        "/etc/*, /var/lib/pve-cluster/*, /root/*, /var/spool/cron/*, /usr/share/kvm/*.vbios"
-
-        Backup target:
-        "$_bdir"
-        -----------------------------------------------------------------
-
-        This script is supposed to backup your node config and not VM
-        or LXC container data. To backup your instances please use the
-        built in backup feature or a backup solution that runs within
-        your instances.
-
-        For questions or suggestions please contact me at
-        https://github.com/DerDanilo/proxmox-stuff
-        -----------------------------------------------------------------
-
-        Hit return to proceed or CTRL-C to abort.
-EOF
-        read dummy
-        clear
+    if [[ ${backup_count} -ge $MAX_BACKUPS ]]; then
+        local old_backup
+        old_backup=$(basename "$(ls "${_bdir}"/*"${_HOSTNAME}"*.tar.gz -t | tail -1)")
+        echo "${_bdir}/${old_backup}"
+        rm "${_bdir}/${old_backup}"
     fi
 }
 
-function are-we-root-abort-if-not {
-    if [[ ${EUID} -ne 0 ]] ; then
-      echo "Aborting because you are not root" ; exit 1
+function copy_filesystem {
+    echo "Creating tar files"
+    # Copy key system files
+    tar --warning='no-file-ignored' -cvPf "${_filename1}" /etc/.
+    tar --warning='no-file-ignored' -cvPf "${_filename9}" /etc/pve/.
+    tar --warning='no-file-ignored' -cvPf "${_filename2}" /var/lib/pve-cluster/.
+    tar --warning='no-file-ignored' -cvPf "${_filename3}" /root/.
+    tar --warning='no-file-ignored' -cvPf "${_filename4}" /var/spool/cron/.
+
+    if [[ -n "$(ls -A /usr/local/bin 2>/dev/null)" ]]; then
+        tar --warning='no-file-ignored' -cvPf "${_filename8}" /usr/local/bin/.
     fi
-}
 
-function check-num-backups {
-    if [[ $(ls ${_bdir}/*${_HOSTNAME}*_*.tar.gz -l | grep ^- | wc -l) -ge $MAX_BACKUPS ]]; then
-      local oldbackup="$(basename $(ls ${_bdir}/*${_HOSTNAME}*.tar.gz -t | tail -1))"
-      echo "${_bdir}/${oldbackup}"
-      rm "${_bdir}/${oldbackup}"
+    if [[ -n "$(ls /usr/share/kvm/*.vbios 2>/dev/null)" ]]; then
+        echo "Backing up custom video BIOS..."
+        tar --warning='no-file-ignored' -cvPf "${_filename5}" /usr/share/kvm/*.vbios
     fi
-}
 
-function copyfilesystem {
-    echo "Tar files"
-    # copy key system files
-    tar --warning='no-file-ignored' -cvPf "$_filename1" /etc/.
-    tar --warning='no-file-ignored' -cvPf "$_filename9" /etc/pve/.
-    tar --warning='no-file-ignored' -cvPf "$_filename2" /var/lib/pve-cluster/.
-    tar --warning='no-file-ignored' -cvPf "$_filename3" /root/.
-    tar --warning='no-file-ignored' -cvPf "$_filename4" /var/spool/cron/.
-
-    if [ "$(ls -A /usr/local/bin 2>/dev/null)" ]; then tar --warning='no-file-ignored' -cvPf "$_filename8" /usr/local/bin/.; fi
-
-    if [ "$(ls /usr/share/kvm/*.vbios 2>/dev/null)" != "" ] ; then
-	echo backing up custom video bios...
-	tar --warning='no-file-ignored' -cvPf "$_filename5" /usr/share/kvm/*.vbios
-    fi
-    # copy installed packages list
+    # Copy installed packages list
     echo "Copying installed packages list from APT"
-    apt-mark showmanual | tee "$_filename6"
-    # copy pvereport output
+    apt-mark showmanual | tee "${_filename6}"
+
+    # Copy pvereport output
     echo "Copying pvereport output"
-    pvereport | tee "$_filename7"
+    pvereport | tee "${_filename7}"
 }
 
-function compressandarchive {
+function compress_and_archive {
     echo "Compressing files"
-    # archive the copied system files
-    tar -cvzPf "$_filename_final" $_tdir/*.{tar,list,txt}
+    tar -cvzPf "${_filename_final}" "${_tdir}"/*.{tar,list,txt}
 
-    # copy config archive to backup folder
-    # this may be replaced by scp command to place in remote location
-    cp $_filename_final $_bdir/
+    # Copy config archive to backup folder
+    cp "${_filename_final}" "${_bdir}/"
 }
 
-function stopservices {
-    # stop host services
-    for i in pve-cluster pvedaemon vz qemu-server; do systemctl stop $i ; done
-    # give them a moment to finish
+function stop_services {
+    for service in pve-cluster pvedaemon vz qemu-server; do
+        systemctl stop "$service"
+    done
+
+    # Give them a moment to finish
     sleep 10s
 }
 
-function startservices {
-    # restart services
-    for i in qemu-server vz pvedaemon pve-cluster; do systemctl start $i ; done
+function start_services {
+    for service in qemu-server vz pvedaemon pve-cluster; do
+        systemctl start "$service"
+    done
+
     # Make sure that all VMs + LXC containers are running
     qm startall
 }
 
+function send_message_to_slack {
+    local file_name
+    file_name=$(basename "${_filename_final}")
+    local file_size
+    file_size=$(wc -c < "${_filename_final}")
+    local response
+    response=$(curl -s \
+        -X POST \
+        -H "Authorization: Bearer ${SLACK_API_TOKEN}" \
+        -F filename="${file_name}" \
+        -F length="${file_size}" \
+        "https://slack.com/api/files.getUploadURLExternal")
+
+    local upload_url
+    upload_url=$(echo "${response}" | jq -r '.upload_url')
+    local file_id
+    file_id=$(echo "${response}" | jq -r '.file_id')
+
+    curl -s \
+        -H "Authorization: Bearer ${SLACK_API_TOKEN}" \
+        -F file=@"${_filename_final}" \
+        "${upload_url}"
+
+    local json_body
+    json_body=$(jq -n \
+        --arg id "${file_id}" \
+        --arg title "${file_name}" \
+        --arg channel "${SLACK_API_TOKEN}" \
+        '[{id: $id, title: $title}]')
+
+    curl -s \
+        -H "Authorization: Bearer ${SLACK_API_TOKEN}" \
+        -F channel_id="${SLACK_CHANNEL}" \
+        -F files="${json_body}" \
+        "https://slack.com/api/files.completeUploadExternal"
+}
+
 ##########
 
-description
-are-we-root-abort-if-not
-check-num-backups
+check_num_backups
 
-# We don't need to stop services, but you can do that if you wish
-#stopservices
+# Uncomment the following lines if you need to stop and start services
+# stop_services
 
-copyfilesystem
+copy_filesystem
 
-# We don't need to start services if we did not stop them
-#startservices
+# Uncomment the following lines if you need to start services after stopping them
+# start_services
 
-compressandarchive
+compress_and_archive
+
+send_message_to_slack
